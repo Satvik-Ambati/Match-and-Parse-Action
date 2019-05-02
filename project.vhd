@@ -103,13 +103,16 @@ begin
 
 process(clk) is
 begin
-	if (rising_edge(clk)) then
+	--if (rising_edge(clk)) then
 		p_state <= n_state;
-	end if;
+	--end if;
 end process;
 
-process(p_state,iData_av,I_Offset) is 
+process(clk,p_state,iData_av,I_Offset) is 
+--signal numofbytes : std_logic_vector(15 downto 0) := "0000000000000000";
 begin
+	I_Length2 <= "0000000000000"&I_Length;
+	if (rising_edge(clk)) then
 	case p_state is
 		when IDLE => 
 			extracted <= (others => '1'); --all 128 bits zeroes
@@ -122,44 +125,48 @@ begin
 				--check if any dv's are 1 -> ditch
 			end if;
 		when READING =>
-			if (to_integer(unsigned(I_Offset)) > to_integer(unsigned(numofbytes))) then
+			if (to_integer(unsigned(I_Offset)) > to_integer(unsigned(numofbytes))+16) then
 				numofbytes <= numofbytes + "0000000000010000";
 				n_state <= READING;
 				two_fragment_check <= '0';
-				extracted <= (others => '0');
+				--extracted <= numofbytes&"1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
 				--Add input data to FIFO
 			else
-				numofbytes <= numofbytes + "0000000000010000";
-				n_state <= READING;
-				extracted <= "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
+				--numofbytes := numofbytes + "0000000000010000";
+				--n_state <= READING;
+				--extracted <= "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
 --				if (I_Offset + I_Length2 <= numofbytes + std_logic_vector(to_unsigned(Length1(iData),16))) then
---					numofbytes <= numofbytes + "0000000000010000";
---					if two_fragment_check='1' then --second part of fragment in case of two fragments
---						extracted(127-to_integer(unsigned(numofbytes-I_Offset))*8 downto 127+1-to_integer(unsigned(I_Length2))*8) <= extract(iData,0,to_integer(unsigned(I_Offset+I_Length2-numofbytes-1)));
---						if (Length1(iData) = 16) then 
---							n_state <= BEFORE_LOOKUP;
---						else
---							n_state <= LOOKUP;
---						end if;
---					else -- in case of a single fragment
---						extracted <= extract(iData,to_integer(unsigned(numofbytes+16-I_Offset)),to_integer(unsigned(numofbytes+16-I_Offset + I_Length2)));
---						Lkup_data <= extract(iData,to_integer(unsigned(numofbytes+16-I_Offset)),to_integer(unsigned(numofbytes+16-I_Offset + I_Length2)));
---						numofbytes<=numofbytes+"0000000000010000";
---						if (Length1(iData) = 16) then 
---							n_state <= BEFORE_LOOKUP;
---						else
---							n_state <= LOOKUP;
---						end if;
---					end if;
---					-- extracted data exists in this fragment
---				else
---					--two fragments
+				if (to_integer(unsigned(I_Offset + I_Length2)) <= to_integer(unsigned(numofbytes + "0000000000010000"))) then
+					numofbytes <= numofbytes + "0000000000010000";
+					if (two_fragment_check='1') then --second part of fragment in case of two fragments
+						extracted(127-to_integer(unsigned(numofbytes-I_Offset))*8 downto 127+1-to_integer(unsigned(I_Length2))*8) <= extract(iData,0,to_integer(unsigned(I_Offset+I_Length2-numofbytes-"0000000000000001")))(127 downto 127+1-to_integer(unsigned(I_Length2+I_Offset-numofbytes))*8)  ;
+						if (Length1(iData) = 16) then 
+							n_state <= BEFORE_LOOKUP;
+						else
+							n_state <= LOOKUP;
+						end if;
+					else -- in case of a single fragment
+						Lkup_data <= "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
+						extracted <= extract(iData,to_integer(unsigned(I_Offset))-to_integer(unsigned(numofbytes)),(to_integer(unsigned(I_Offset))+to_integer(unsigned(I_Length2))-1-to_integer(unsigned(numofbytes))));
+--						Lkup_data <= "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
+						--numofbytes :=numofbytes+"0000000000010000";
+						if (Length1(iData) = 16) then 
+							n_state <= BEFORE_LOOKUP;
+						else
+							n_state <= LOOKUP;
+						end if;
+					end if;
+					-- extracted data exists in this fragment
+				else
+					--two fragments
 --					extracted(127 downto 127+1-to_integer(unsigned(numofbytes+std_logic_vector(to_unsigned(Length1(iData),16))-I_Offset))*8) <= extract(iData, to_integer(unsigned(I_Offset)), 15);
---					numofbytes <= numofbytes + "0000000000010000";
---					two_fragment_check <= '1';
---					n_state <= READING;
---				end if;
+					extracted <= extract(iData, to_integer(unsigned(I_Offset)), 15);
+					numofbytes <= numofbytes + "0000000000010000";
+					two_fragment_check <= '1';
+					n_state <= READING;
+				end if;
 			end if;
+			
 				--Add func(iData) bytes to FIFO
 				--extract starting from I_offset 
 		when BEFORE_LOOKUP =>
@@ -169,9 +176,10 @@ begin
 				n_state <= LOOKUP;
 			end if;
 		when LOOKUP =>
-			--Lkup_data <= extracted;
+--			Lkup_data <= extracted;
 			n_state <= LOOKUP;
 		end case;
+		end if;
 	end process;
 
 			
