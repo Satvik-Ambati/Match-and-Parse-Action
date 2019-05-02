@@ -38,13 +38,13 @@ entity Project is
 --           oData_rd : in  STD_LOGIC;
 --           oData : out  STD_LOGIC_VECTOR (143 downto 0);
            Lkup_data : out  STD_LOGIC_VECTOR (127 downto 0);
---           Lkup_valid : out  STD_LOGIC;
---           Lkup_Flow_miss : in  STD_LOGIC;
---           Lkup_Flow_priority : in  STD_LOGIC_VECTOR (2 downto 0);
---           Lkup_Flow_id : in  STD_LOGIC_VECTOR (7 downto 0);
---           Lkup_Flow_info : in  STD_LOGIC_VECTOR (255 downto 0);
---           Lkup_Flow_instruction : in  STD_LOGIC_VECTOR (7 downto 0);
---           Lkup_Flow_info_valid : in  STD_LOGIC_VECTOR (7 downto 0);
+           Lkup_valid : out  STD_LOGIC;
+           Lkup_Flow_miss : in  STD_LOGIC;
+           Lkup_Flow_priority : in  STD_LOGIC_VECTOR (2 downto 0);
+           Lkup_Flow_id : in  STD_LOGIC_VECTOR (7 downto 0);
+           Lkup_Flow_info : in  STD_LOGIC_VECTOR (255 downto 0);
+           Lkup_Flow_instruction : in  STD_LOGIC_VECTOR (7 downto 0);
+             Lkup_Flow_info_valid : in  STD_LOGIC;
 --           Flow_id : in  STD_LOGIC_VECTOR (7 downto 0);
 --           Burst_Size : in  STD_LOGIC_VECTOR (15 downto 0);
 --           Flow_rate : in  STD_LOGIC_VECTOR (15 downto 0);
@@ -55,19 +55,36 @@ entity Project is
 --           O_Offset : in  STD_LOGIC_VECTOR (15 downto 0);
 --           O_Length : in  STD_LOGIC_VECTOR (2 downto 0);
 --           O_Instruction : in  STD_LOGIC_VECTOR (7 downto 0);
-			  extracted : OUT std_logic_vector( 127 downto 0);
+--			  extracted : OUT std_logic_vector( 127 downto 0);
            clk : in  STD_LOGIC;
            rst : in  STD_LOGIC);
 end Project;
 
 architecture Behavioral of Project is
-
-type states is (IDLE, READING, BEFORE_LOOKUP, LOOKUP);
+COMPONENT fifo
+  PORT (
+    clk : IN STD_LOGIC;
+    rst : IN STD_LOGIC;
+    din : IN STD_LOGIC_VECTOR(143 DOWNTO 0);
+    wr_en : IN STD_LOGIC;
+    rd_en : IN STD_LOGIC;
+    dout : OUT STD_LOGIC_VECTOR(143 DOWNTO 0);
+    full : OUT STD_LOGIC;
+    empty : OUT STD_LOGIC
+  );
+END COMPONENT;
+type states is (IDLE, READING, BEFORE_LOOKUP, LOOKUP, WAIT_TO_STORE, FLOW_MISS, RATE_LIMIT_LOGIC);
 signal p_state, n_state : states := IDLE;
 signal numofbytes : std_logic_vector(15 downto 0) := "0000000000000000";
---signal extracted : std_logic_vector( 127 downto 0); 
+signal extracted : std_logic_vector( 127 downto 0); 
 signal I_Length2 : std_logic_Vector( 15 downto 0) := "0000000000000"&I_Length;
 signal two_fragment_check : std_logic := '0';
+
+signal Lkup_Flow_miss2 :   STD_LOGIC;
+signal Lkup_Flow_priority2 :  STD_LOGIC_VECTOR (2 downto 0);
+signal Lkup_Flow_id2 :  STD_LOGIC_VECTOR (7 downto 0);
+signal Lkup_Flow_info2 :  STD_LOGIC_VECTOR (255 downto 0);
+signal Lkup_Flow_instruction2 : STD_LOGIC_VECTOR (7 downto 0);
 
 function Length1(fragment : std_logic_vector(143 downto 0)) return integer is
 		variable length1 : integer range 0 to 144 := 0;
@@ -97,10 +114,26 @@ begin
 	return output;
 
 end function;
-
+signal rst1 : std_logic := '0';
+signal din : std_logic_vector(143 downto 0) := (others => '0');
+signal wr_en : std_logic := '0';
+signal rd_en : std_logic := '0';
+signal dout : std_logic_vector(143 downto 0) := (others => '0');
+signal full : std_logic := '0'; 
+signal empty : std_logic := '0';
 
 begin
-
+your_instance_name : fifo
+  PORT MAP (
+    clk => clk,
+    rst => rst1,
+    din => din,
+    wr_en => wr_en,
+    rd_en => rd_en,
+    dout => dout,
+    full => full,
+    empty => empty
+  );
 process(clk) is
 begin
 	--if (rising_edge(clk)) then
@@ -125,6 +158,8 @@ begin
 				--check if any dv's are 1 -> ditch
 			end if;
 		when READING =>
+			wr_en <= '1';
+			din <= iData;
 			if (to_integer(unsigned(I_Offset)) > to_integer(unsigned(numofbytes))+16) then
 				numofbytes <= numofbytes + "0000000000010000";
 				n_state <= READING;
@@ -146,10 +181,8 @@ begin
 							n_state <= LOOKUP;
 						end if;
 					else -- in case of a single fragment
-						Lkup_data <= "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
 						extracted <= extract(iData,to_integer(unsigned(I_Offset))-to_integer(unsigned(numofbytes)),(to_integer(unsigned(I_Offset))+to_integer(unsigned(I_Length2))-1-to_integer(unsigned(numofbytes))));
 --						Lkup_data <= "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
-						--numofbytes :=numofbytes+"0000000000010000";
 						if (Length1(iData) = 16) then 
 							n_state <= BEFORE_LOOKUP;
 						else
@@ -174,14 +207,36 @@ begin
 				n_state <= BEFORE_LOOKUP;
 			else
 				n_state <= LOOKUP;
+				
 			end if;
 		when LOOKUP =>
---			Lkup_data <= extracted;
-			n_state <= LOOKUP;
+			Lkup_data <= extracted;
+			Lkup_valid <= '1';
+			n_state <= WAIT_TO_STORE;
+		
+		when WAIT_TO_STORE =>
+			if (Lkup_Flow_info_valid='1') then
+				Lkup_Flow_miss2 <= Lkup_Flow_miss;
+           Lkup_Flow_priority2 <=  Lkup_Flow_priority;
+           Lkup_Flow_id2 <= Lkup_Flow_id;
+           Lkup_Flow_info2 <= Lkup_Flow_info;
+           Lkup_Flow_instruction2<= Lkup_Flow_instruction;
+			  n_state <= FLOW_MISS;
+				--store flow related info in  registers
+			else
+				n_state <= WAIT_TO_STORE;
+			end if;
+		when FLOW_MISS =>
+			if (Lkup_Flow_miss2='1') then
+				n_state <= IDLE;
+			else
+				n_state <= RATE_LIMIT_LOGIC;
+			end if;
+		when RATE_LIMIT_LOGIC =>
+			null;
 		end case;
 		end if;
 	end process;
-
-			
+		
 end Behavioral;
 
